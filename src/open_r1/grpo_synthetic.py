@@ -127,7 +127,7 @@ def main(script_args, training_args, model_args):
                     if line:
                         yield json.loads(line)
 
-    with open("shard_00000000_processed.jsonl", "r") as tf:
+    with open("data/shard_00000000_processed.jsonl", "r") as tf:
         dataset = datasets.Dataset.from_list(
             [
                 {"text": json.loads(line)["text"][:7000]}
