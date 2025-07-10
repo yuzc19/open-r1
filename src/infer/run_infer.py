@@ -1,4 +1,4 @@
-from src.open_r1.grpo_synthetic import distill_prompt
+from open_r1.grpo_synthetic import distill_prompt
 from vllm import LLM, TokensPrompt, SamplingParams
 from pathlib import Path as LocalPath
 from google.cloud import storage
