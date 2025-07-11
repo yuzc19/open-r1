@@ -135,6 +135,7 @@ def main(script_args, training_args, model_args):
                 # for item in load_local_jsonl_zst("CC_shard_00000000_processed.jsonl.zst")
             ]
         )
+        dataset = dataset.train_test_split(test_size=128, shuffle=True, seed=training_args.seed)
     logger.info(f"Dataset loaded with {len(dataset)} examples.")
 
     ################
@@ -175,7 +176,8 @@ def main(script_args, training_args, model_args):
         model=model,
         reward_funcs=reward_funcs,
         args=training_args,
-        train_dataset=dataset,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["test"],
         peft_config=get_peft_config(model_args),
         callbacks=get_callbacks(training_args, model_args),
         processing_class=tokenizer,
