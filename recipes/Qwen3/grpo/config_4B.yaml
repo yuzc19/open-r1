@@ -1,5 +1,5 @@
 # Model arguments
-model_name_or_path: Qwen/Qwen3-1.7B
+model_name_or_path: Qwen/Qwen3-4B
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
@@ -14,7 +14,9 @@ system_prompt: "A chat between a curious user and an artificial intelligence ass
 bf16: true
 use_vllm: true
 vllm_mode: colocate
-do_eval: false
+do_eval: true
+eval_strategy: steps
+eval_steps: 3
 gradient_accumulation_steps: 4
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
@@ -32,13 +34,13 @@ lr_scheduler_kwargs:
   min_lr_rate: 0.1
 max_prompt_length: 2048
 max_completion_length: 2048
-max_steps: 20
-num_generations: 8
+max_steps: 100
+num_generations: 16
 num_train_epochs: 1
-output_dir: /tmp/synthetic_data_generator_Qwen3-1.7B_step30
+output_dir: /data/user_data/zichunyu/out/synthetic_data_generator_Qwen3-4B_step100
 overwrite_output_dir: true
-per_device_eval_batch_size: 16
-per_device_train_batch_size: 2
+per_device_eval_batch_size: 4
+per_device_train_batch_size: 1
 push_to_hub: false
 report_to:
 - wandb
@@ -46,11 +48,11 @@ wandb_entity: cxcscmu
 wandb_project: synthetic_data
 # run_name: fastText+format+BERTScore-reward
 reward_funcs:
-- fasttext
+- dim
 - format
 - bert_score
 reward_weights:
-- 8.0
+- 10.0
 - 1.0
 - 1.0
 save_strategy: steps

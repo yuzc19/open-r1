@@ -1,0 +1,64 @@
+# Model arguments
+model_name_or_path: Qwen/Qwen3-1.7B
+model_revision: main
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+
+# Data training arguments
+dataset_name: dclm
+dataset_prompt_column: text
+# system_prompt: "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the questions."
+system_prompt: "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the questions. /no_think"
+
+# GRPO trainer config
+bf16: true
+use_vllm: true
+vllm_mode: colocate
+do_eval: true
+eval_strategy: steps
+eval_steps: 3
+gradient_accumulation_steps: 4
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+hub_model_id: synthetic_data_generator
+hub_strategy: every_save
+learning_rate: 1.0e-05
+log_completions: true
+log_level: info
+logging_first_step: true
+logging_steps: 1
+logging_strategy: steps
+lr_scheduler_type: cosine_with_min_lr
+lr_scheduler_kwargs:
+  min_lr_rate: 0.1
+max_prompt_length: 2048
+max_completion_length: 2048
+max_steps: 100
+num_generations: 16
+num_train_epochs: 1
+output_dir: /data/user_data/zichunyu/out/synthetic_data_generator_Qwen3-1.7B_step100
+overwrite_output_dir: true
+per_device_eval_batch_size: 16
+per_device_train_batch_size: 2
+push_to_hub: false
+report_to:
+- wandb
+wandb_entity: cxcscmu
+wandb_project: synthetic_data
+# run_name: fastText+format+BERTScore-reward
+reward_funcs:
+- dim
+- format
+- bert_score
+reward_weights:
+- 10.0
+- 1.0
+- 1.0
+save_strategy: steps
+save_steps: 120
+save_total_limit: 1
+seed: 42
+temperature: 1.0
+top_p: 0.9
+warmup_ratio: 0.1

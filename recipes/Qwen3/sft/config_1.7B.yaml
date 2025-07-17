@@ -1,0 +1,47 @@
+# Model arguments
+model_name_or_path: Qwen/Qwen3-1.7B
+model_revision: main
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+
+# Data training arguments
+dataset_name: yuzc19/dclm_rephrased_mini
+
+# SFT trainer config
+bf16: true
+do_eval: true
+eval_strategy: steps
+eval_steps: 3
+gradient_accumulation_steps: 4
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+hub_model_id: synthetic_data_generator
+hub_strategy: every_save
+learning_rate: 5.0e-5
+log_level: info
+logging_first_step: true
+logging_steps: 1
+logging_strategy: steps
+lr_scheduler_type: cosine_with_min_lr
+lr_scheduler_kwargs:
+  min_lr_rate: 0.1
+packing: false
+max_grad_norm: 0.2
+max_length: 8192
+max_steps: -1
+num_train_epochs: 5
+output_dir: /data/user_data/zichunyu/out/synthetic_data_generator_Qwen3-1.7B_sft
+overwrite_output_dir: true
+per_device_eval_batch_size: 16
+per_device_train_batch_size: 2
+push_to_hub: false
+report_to:
+- wandb
+wandb_entity: cxcscmu
+wandb_project: synthetic_data
+save_strategy: epoch
+save_total_limit: 1
+seed: 42
+use_liger_kernel: true
+warmup_ratio: 0.03
