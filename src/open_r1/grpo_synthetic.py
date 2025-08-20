@@ -57,7 +57,7 @@ distill_prompt_2 = """Your task is to read and paraphrase the provided text foll
   - Website headers, navigation bars, or menu items (e.g., "Home | About | Contact")
   - Unrelated HTTP links (e.g., ads, trackers, developer tools)
   - Generic footers (e.g., contact info, privacy policies, unsubscribe links)
-  - Empty lines or decorative elements (e.g., “---”)
+  - Empty lines or decorative elements (e.g., "---")
 - Preserve all content that is relevant and meaningful:
   - Informative or independently useful
   - Related to the topic, even tangentially
@@ -69,7 +69,7 @@ distill_prompt_2 = """Your task is to read and paraphrase the provided text foll
 - Do not alter meaningful content unnecessarily:
   - Only delete or modify when content is clearly meaningless or off-topic
   - Preserve the original structure, logic, and depth of the text
-- Do not add explanations, assumptions, or claims not found in the original text
+- Do not add explanations, notes, assumptions, or claims not found in the original text
 Here is the text:
 {TEXT}
 Task:
@@ -127,16 +127,19 @@ def main(script_args, training_args, model_args):
                     if line:
                         yield json.loads(line)
 
-    with open("data/shard_00000000_processed.jsonl", "r") as tf:
+    with open("data/50000_sample_low_score.jsonl", "r") as tf:
         dataset = datasets.Dataset.from_list(
             [
-                {"text": json.loads(line)["text"][:7000]}
+                {
+                    "text": json.loads(line)["text"][:7000],
+                    "dataman_score": json.loads(line)["dataman_score"],
+                }
                 for line in tf
                 # for item in load_local_jsonl_zst("CC_shard_00000000_processed.jsonl.zst")
             ]
         )
         dataset = dataset.train_test_split(test_size=128, shuffle=True, seed=training_args.seed)
-    logger.info(f"Dataset loaded with {len(dataset)} examples.")
+    logger.info(f"Dataset loaded with {len(dataset['train'])} examples.")
 
     ################
     # Load tokenizer

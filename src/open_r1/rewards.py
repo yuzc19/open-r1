@@ -16,19 +16,41 @@
 """Reward functions for GRPO training."""
 
 import asyncio
+import random
 import math
+import glob
+import json
 import re
 import os
 from typing import Callable, Dict, Literal, Optional
 
+import torch
 import fasttext
 from bert_score import BERTScorer
+from transformers import AutoTokenizer
+from dingo_dataman import InputArgs, Executor
+from infer.simple_dataman import DataManInference
 from latex2sympy2_extended import NormalizationConfig
 from math_verify import LatexExtractionConfig, parse, verify
+from modeling_data_influence_model import BertForSequenceClassification
 
-fasttext_path = "/project/flame/zichunyu/code/dclm/baselines/mappers/enrichers/quality_prediction_enrichment_models/fasttext_oh_eli5.bin"
-fasttext_model = fasttext.load_model(fasttext_path)
+# fasttext_path = "/project/flame/zichunyu/code/dclm/baselines/mappers/enrichers/quality_prediction_enrichment_models/fasttext_oh_eli5.bin"
+# fasttext_model = fasttext.load_model(fasttext_path)
 bert_scorer = BERTScorer(model_type="microsoft/deberta-large-mnli", device=f"cuda:{os.environ.get('LOCAL_RANK', 0)}")
+# tokenizer = AutoTokenizer.from_pretrained(
+#     "bert-base-uncased",
+#     max_length=2048,
+#     padding="max_length",
+# )
+llm = DataManInference(use_server=True)
+# dim_model = BertForSequenceClassification.from_pretrained(
+#     "/project/flame/zichunyu/out/10000-data_influence_model-flan",
+#     torch_dtype=torch.bfloat16,
+#     problem_type="regression",
+#     num_labels=1,
+# )
+# dim_model.eval()
+# dim_model.to(f"cuda:{os.environ.get('LOCAL_RANK', 0)}")
 
 
 def classify_fasttext_hq_prob(content: str):
@@ -68,6 +90,86 @@ def fasttext_reward(completions: list[list[dict[str, str]]], **kwargs) -> list[f
     return rewards
 
 
+def dingo_dataman_reward(completions: list[list[dict[str, str]]], text: list[str], **kwargs) -> list[float]:
+    """Reward function that uses a data quality model to score completions."""
+    contents = []
+    for completion in completions:
+        content = completion[0]["content"]
+        match = re.search(r"Here is a paraphrased version:(.*)", content, re.DOTALL)
+        if match:
+            # Extract the response within the tags
+            response = match.group(1).strip()
+            contents.append(response)
+        else:
+            contents.append("")
+
+    # get a random number
+    random_number = random.randint(0, 1000000)
+    input_path = f"/tmp/dataman_input_{random_number}.jsonl"
+    with open(input_path, "w") as f:
+        for i, content in enumerate(contents + text[:1]):
+            f.write(json.dumps({"id": i, "content": content}) + "\n")
+    output_path = f"/tmp/dataman_output_{random_number}"
+    input_data = {
+        "input_path": input_path,
+        "output_path": output_path,
+        "save_data": True,
+        "save_correct": True,
+        "dataset": "local",
+        "data_format": "jsonl",
+        "column_id": "id",
+        "column_content": "content",
+        "batch_size": len(contents) + 1,
+        "custom_config": {
+            "prompt_list": ["PromptDataManNew"],
+            "llm_config": {
+                "dataman_assessment_new": {
+                    "model": "gpt-4o-mini",
+                    "key": os.environ.get("OPENAI_API_KEY"),
+                    "api_url": "https://api.openai.com/v1",
+                }
+            },
+        },
+        "log_level": "WARNING",
+    }
+    input_args = InputArgs(**input_data)
+    executor = Executor.exec_map["local"](input_args)
+    executor.execute()
+    jsonl_files = glob.glob(f"{output_path}/**/**/*.jsonl", recursive=True)
+    dataman_rewards = [0] * (len(contents) + 1)
+    for file in jsonl_files:
+        with open(file, "r", encoding="utf-8") as f:
+            for line in f:
+                obj = json.loads(line)
+                if obj["content"] == "" or len(obj["reason_list"]) != 2:
+                    continue
+                dataman_rewards[int(obj["data_id"])] = int(obj["reason_list"][0])
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("Contents", contents)
+        print("Dataman rewards: ", dataman_rewards)
+    return [dataman_rewards[i] - dataman_rewards[len(contents)] for i in range(len(contents))]
+
+
+def dataman_reward(completions: list[list[dict[str, str]]], text: list[str], dataman_score: list[float],  **kwargs) -> list[float]:
+    """Reward function that uses a data quality model to score completions."""
+    contents = []
+    for completion in completions:
+        content = completion[0]["content"]
+        match = re.search(r"Here is a paraphrased version:(.*)", content, re.DOTALL)
+        if match:
+            # Extract the response within the tags
+            response = match.group(1).strip()
+            contents.append(response)
+        else:
+            contents.append("")
+
+    results = llm.score_texts(contents)
+    dataman_rewards = [r.get("overall_score", 0) for r in results]
+    # print("Dataman rewards: ", dataman_rewards)
+    # return [dataman_rewards[i] - dataman_rewards[len(contents)] for i in range(len(contents))]
+    return [dataman_rewards[i] - dataman_score[i] for i in range(len(contents))]
+
+
 def bert_score_reward(completions: list[list[dict[str, str]]], text: list[str], **kwargs) -> list[float]:
     """Reward function that uses BERTScore to compare generated content with original text."""
     contents = []
@@ -81,15 +183,70 @@ def bert_score_reward(completions: list[list[dict[str, str]]], text: list[str], 
             contents.append(response)
         else:
             contents.append("")
-    print(len(completions), "completions")
-    print(f"MODEL GENERATION:\n{completions[0][0]['content']}")
-    print("-" * 80)
-    print(f"TEXT:\n{text[0]}")
-    print("-" * 80)
-    P, R, F1 = bert_scorer.score(contents, text, batch_size=2)
+    # print(len(completions), "completions")
+    # print(f"MODEL GENERATION:\n{completions[0][0]['content']}")
+    # print("-" * 80)
+    # print(f"TEXT:\n{text[0]}")
+    # print("-" * 80)
+    P, R, F1 = bert_scorer.score(contents, text, batch_size=1)
 
     # Return F1 scores as rewards
-    return F1.tolist()
+    # return F1.tolist()
+    return [int(float(f1) > 0.65) for f1 in F1.tolist()]
+
+def length_reward(completions: list[list[dict[str, str]]], text: list[str], **kwargs) -> list[float]:
+    """Reward function that uses the length of the generated content."""
+    contents = []
+    for completion in completions:
+        content = completion[0]["content"]
+        # match = re.search(r"<answer>\n(.*?)\n</answer>", content, re.DOTALL)
+        match = re.search(r"Here is a paraphrased version:(.*)", content, re.DOTALL)
+        if match:
+            # Extract the response within the tags
+            response = match.group(1).strip()
+            contents.append(response)
+        else:
+            contents.append("")
+
+    return [len(c) <= 1.25 * len(t) for c, t in zip(contents, text)]
+
+
+def dim_reward(completions: list[list[dict[str, str]]], **kwargs) -> list[float]:
+    """Reward function that uses a data influence model to score generated content."""
+    contents = []
+    for completion in completions:
+        content = completion[0]["content"]
+        # match = re.search(r"<answer>\n(.*?)\n</answer>", content, re.DOTALL)
+        match = re.search(r"Here is a paraphrased version:(.*)", content, re.DOTALL)
+        if match:
+            # Extract the response within the tags
+            response = match.group(1).strip()
+            contents.append(response)
+        else:
+            contents.append("")
+
+    batch_size = 2
+    all_scores = []
+    for i in range(0, len(contents), batch_size):
+        encoding = tokenizer.batch_encode_plus(
+            contents[i:i + batch_size],
+            max_length=2048,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        ).to(dim_model.device)
+
+        with torch.no_grad():
+            outputs = dim_model(
+                input_ids=encoding["input_ids"],
+                attention_mask=encoding["attention_mask"],
+                token_type_ids=encoding.get("token_type_ids", None),
+                output_hidden_states=True,
+            )
+
+        scores = (-1 * outputs.logits).detach().float().cpu().numpy().reshape(-1).tolist()
+        all_scores.extend(scores)
+    return all_scores
 
 
 def accuracy_reward(completions: list[list[dict[str, str]]], solution: list[str], **kwargs) -> list[Optional[float]]:
@@ -468,7 +625,10 @@ def get_reward_funcs(script_args) -> list[Callable]:
             soft_punish_cache=script_args.soft_punish_cache,
         ),
         "fasttext": fasttext_reward,
+        "dim": dim_reward,
+        "dataman": dataman_reward,
         "bert_score": bert_score_reward,
+        "length": length_reward,
     }
     reward_funcs = [REWARD_FUNCS_REGISTRY[func] for func in script_args.reward_funcs]
 

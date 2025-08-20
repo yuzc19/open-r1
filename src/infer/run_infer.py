@@ -1,4 +1,3 @@
-from open_r1.grpo_synthetic import distill_prompt
 from vllm import LLM, TokensPrompt, SamplingParams
 from pathlib import Path as LocalPath
 from google.cloud import storage
@@ -9,6 +8,31 @@ import datasets
 import json
 import sys
 import re
+
+distill_prompt = """Your task is to read and paraphrase the provided text following these instructions:
+- Delete clearly irrelevant content:
+  - Website headers, navigation bars, or menu items (e.g., "Home | About | Contact")
+  - Unrelated HTTP links (e.g., ads, trackers, developer tools)
+  - Generic footers (e.g., contact info, privacy policies, unsubscribe links)
+  - Empty lines or decorative elements (e.g., "---")
+- Preserve all content that is relevant and meaningful:
+  - Informative or independently useful
+  - Related to the topic, even tangentially
+  - Provides context, background, or supporting value
+  - Includes technical terms, key concepts, factual details, reasoning, and examples
+- Handle mixed-relevance sentences carefully:
+  - Remove only the irrelevant fragment if the rest remains coherent
+  - Delete the whole sentence if the remainder loses meaning
+- Do not alter meaningful content unnecessarily:
+  - Only delete or modify when content is clearly meaningless or off-topic
+  - Preserve the original structure, logic, and depth of the text
+- Do not add explanations, notes, assumptions, or claims not found in the original text
+Here is the text:
+{TEXT}
+Task:
+After thoroughly reading the above text, paraphrase it in high-quality and clear English following the instructions.
+Start your response immediately with "Here is a paraphrased version:" and then provide the paraphrased text."""
+
 
 gstore = storage.Client().bucket("cmu-gpucloud-zichunyu")
 sampling_params = SamplingParams(
@@ -81,11 +105,23 @@ def main():
     rank = int(sys.argv[1])
     print(f"Received argument: {rank}")
 
-    llm = LLM(model="Qwen/Qwen3-1.7B")  # 2400 min / 1B tokens / 1 GPU
-    # 3 hour for one file, 96 files for 5B tokens
+    # llm = LLM(model="openai/gpt-oss-20b")
+    # llm = LLM(model="Qwen/Qwen3-30B-A3B-FP8")
+    # llm = LLM(model="/tmp/synthetic_data_generator_Qwen3-1.7B_step20/checkpoint-20")
+    # llm = LLM(model="/tmp/synthetic_data_generator_Qwen3-1.7B_sft/checkpoint-98")
+    # llm = LLM(model="/project/flame/zichunyu/out/synthetic_data_generator_Qwen3-1.7B_sft/checkpoint-761")
+    llm = LLM(model="/project/flame/zichunyu/out/synthetic_data_generator_Qwen3-1.7B_grpo/checkpoint-1560")
+    # 96 files for 5B tokens, 2400 min / 1B tokens / 1 GPU
+    # Qwen3-1.7B: 57.29s/it
+    # Qwen3-4B: 99.06s/it
+    # Qwen3-8B: 117.43s/it
+    # openai/gpt-oss-20b: 85.70s/it
+    # Qwen3-30B-A3B-FP8: 88.59s/it
+    # Qwen3-30B-A3B: 244.10s/it (3.8× compared to dense 30B)
     read_template = "s3://commoncrawl/contrib/datacomp/DCLM-refinedweb/global-shard_01_of_10/local-shard_0_of_10/shard_{}_processed.jsonl.zstd"
-    write_template = "data/refinedweb_01_0/Qwen3-1.7B/textfiles/shard_{}_processed.jsonl"
-    for i in tqdm(range(rank * 4, (rank + 1) * 4), desc="Processing shards..."):
+    # write_template = ("data/refinedweb_01_0/Qwen3-1.7B-sft-4o/textfiles/shard_{}_processed.jsonl")
+    write_template = ("data/refinedweb_01_0/Qwen3-1.7B-grpo-1560/textfiles/shard_{}_processed.jsonl")
+    for i in tqdm(range(rank * 8, (rank + 1) * 8), desc="Processing shards..."):
         read_file_name = read_template.format(str(i).zfill(8))
         print(f"Processing file: {read_file_name}")
         data_list = []
