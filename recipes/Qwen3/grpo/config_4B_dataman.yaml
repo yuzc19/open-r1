@@ -53,9 +53,11 @@ reward_funcs:
 - dataman
 - format
 - bert_score
+- structure
 - length
 reward_weights:
 - 3.0
+- 1.0
 - 1.0
 - 1.0
 - 1.0

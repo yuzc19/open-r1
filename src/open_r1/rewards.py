@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Reward functions for GRPO training."""
-
+import requests
 import asyncio
 import random
 import math
@@ -30,6 +30,7 @@ from bert_score import BERTScorer
 from transformers import AutoTokenizer
 from dingo_dataman import InputArgs, Executor
 from infer.simple_dataman import DataManInference
+from infer.simple_structure import StructureInference
 from latex2sympy2_extended import NormalizationConfig
 from math_verify import LatexExtractionConfig, parse, verify
 from modeling_data_influence_model import BertForSequenceClassification
@@ -42,7 +43,8 @@ bert_scorer = BERTScorer(model_type="microsoft/deberta-large-mnli", device=f"cud
 #     max_length=2048,
 #     padding="max_length",
 # )
-llm = DataManInference(use_server=True)
+dataman_llm = DataManInference(use_server=True)
+structure_llm = StructureInference(use_server=True)
 # dim_model = BertForSequenceClassification.from_pretrained(
 #     "/project/flame/zichunyu/out/10000-data_influence_model-flan",
 #     torch_dtype=torch.bfloat16,
@@ -163,11 +165,34 @@ def dataman_reward(completions: list[list[dict[str, str]]], text: list[str], dat
         else:
             contents.append("")
 
-    results = llm.score_texts(contents)
+    results = dataman_llm.score_texts(contents)
     dataman_rewards = [r.get("overall_score", 0) for r in results]
-    # print("Dataman rewards: ", dataman_rewards)
     # return [dataman_rewards[i] - dataman_rewards[len(contents)] for i in range(len(contents))]
     return [dataman_rewards[i] - dataman_score[i] for i in range(len(contents))]
+
+
+def oracle_reward(completions: list[list[dict[str, str]]], **kwargs) -> list[float]:
+    """Reward function that uses a data quality model to score completions."""
+    contents = []
+    for completion in completions:
+        content = completion[0]["content"]
+        match = re.search(r"Here is a paraphrased version:(.*)", content, re.DOTALL)
+        if match:
+            # Extract the response within the tags
+            response = match.group(1).strip()
+            contents.append(response)
+        else:
+            contents.append("")
+
+    response = requests.post(
+        "http://127.0.0.1:24774/get_oracle",
+        json={"texts": contents}
+    )
+    if response.status_code == 200:
+        oracle_values = response.json()["oracle_scores"]
+    else:
+        oracle_values = [0] * len(contents)
+    return oracle_values
 
 
 def bert_score_reward(completions: list[list[dict[str, str]]], text: list[str], **kwargs) -> list[float]:
@@ -193,6 +218,25 @@ def bert_score_reward(completions: list[list[dict[str, str]]], text: list[str], 
     # Return F1 scores as rewards
     # return F1.tolist()
     return [int(float(f1) > 0.65) for f1 in F1.tolist()]
+    # return [int(float(f1) > 0.75) for f1 in F1.tolist()]
+
+
+def structure_reward(completions: list[list[dict[str, str]]], text: list[str], dataman_score: list[float],  **kwargs) -> list[float]:
+    """Reward function that uses a structure comparison model to score completions."""
+    contents = []
+    for completion in completions:
+        content = completion[0]["content"]
+        match = re.search(r"Here is a paraphrased version:(.*)", content, re.DOTALL)
+        if match:
+            # Extract the response within the tags
+            response = match.group(1).strip()
+            contents.append(response)
+        else:
+            contents.append("")
+
+    structure_rewards = structure_llm.score_texts(text, contents)
+    return structure_rewards
+
 
 def length_reward(completions: list[list[dict[str, str]]], text: list[str], **kwargs) -> list[float]:
     """Reward function that uses the length of the generated content."""
@@ -627,7 +671,9 @@ def get_reward_funcs(script_args) -> list[Callable]:
         "fasttext": fasttext_reward,
         "dim": dim_reward,
         "dataman": dataman_reward,
+        "oracle": oracle_reward,
         "bert_score": bert_score_reward,
+        "structure": structure_reward,
         "length": length_reward,
     }
     reward_funcs = [REWARD_FUNCS_REGISTRY[func] for func in script_args.reward_funcs]

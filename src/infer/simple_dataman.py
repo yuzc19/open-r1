@@ -189,7 +189,6 @@ class DataManInference:
             self.llm = LLM(model=self.model_name, tokenizer=self.model_name)
 
         # Set up sampling parameters
-        # vllm serve RuPeng/DataMan-1.5B-EN --temperature 0.0 --seed 1024 --stop_token_ids [151643, 151645] --max_tokens 29
         self.sampling_params = SamplingParams(
             temperature=self.temperature,
             seed=self.seed,
