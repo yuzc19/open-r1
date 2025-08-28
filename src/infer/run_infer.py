@@ -110,7 +110,8 @@ def main():
     # llm = LLM(model="/tmp/synthetic_data_generator_Qwen3-1.7B_step20/checkpoint-20")
     # llm = LLM(model="/tmp/synthetic_data_generator_Qwen3-1.7B_sft/checkpoint-98")
     # llm = LLM(model="/project/flame/zichunyu/out/synthetic_data_generator_Qwen3-1.7B_sft/checkpoint-761")
-    llm = LLM(model="/project/flame/zichunyu/out/synthetic_data_generator_Qwen3-1.7B_grpo/checkpoint-1560")
+    # llm = LLM(model="/project/flame/zichunyu/out/synthetic_data_generator_Qwen3-1.7B_grpo/checkpoint-1560")
+    llm = LLM(model="/project/flame/zichunyu/out/synthetic_data_generator_Qwen3-4B_grpo/checkpoint-1740") # 24h/3B/node
     # 96 files for 5B tokens, 2400 min / 1B tokens / 1 GPU
     # Qwen3-1.7B: 57.29s/it
     # Qwen3-4B: 99.06s/it
@@ -120,8 +121,12 @@ def main():
     # Qwen3-30B-A3B: 244.10s/it (3.8× compared to dense 30B)
     read_template = "s3://commoncrawl/contrib/datacomp/DCLM-refinedweb/global-shard_01_of_10/local-shard_0_of_10/shard_{}_processed.jsonl.zstd"
     # write_template = ("data/refinedweb_01_0/Qwen3-1.7B-sft-4o/textfiles/shard_{}_processed.jsonl")
-    write_template = ("data/refinedweb_01_0/Qwen3-1.7B-grpo-1560/textfiles/shard_{}_processed.jsonl")
-    for i in tqdm(range(rank * 8, (rank + 1) * 8), desc="Processing shards..."):
+    write_template = ("data/refinedweb_01_0/Qwen3-4B-grpo-1740/textfiles/shard_{}_processed.jsonl")
+    for i in tqdm(range(rank * 4, (rank + 1) * 4), desc="Processing shards..."):
+        write_file_name = write_template.format(str(i).zfill(8))
+        if gstore.blob(write_file_name).exists():
+            print(f"{write_file_name} already exists!")
+            continue
         read_file_name = read_template.format(str(i).zfill(8))
         print(f"Processing file: {read_file_name}")
         data_list = []
@@ -135,7 +140,6 @@ def main():
             tid += 1
         dataset = datasets.Dataset.from_list(data_list).map(make_conversation)
         transformed_texts = vllm_inference(llm, dataset)
-        write_file_name = write_template.format(str(i).zfill(8))
         with gstore.blob(write_file_name).open("w") as f:
             print(f"Writing to file: {write_file_name}")
             prev_tid = 0
