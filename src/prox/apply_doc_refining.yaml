@@ -1,0 +1,7 @@
+# Input Data configs
+data_path: /tmp/data/refinedweb_01_0/textfiles
+
+# Save configs
+save_path: /tmp/data/refinedweb_01_0
+save_name: "prox"
+save_interval: 100000
