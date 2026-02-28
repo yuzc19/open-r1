@@ -149,6 +149,18 @@ def format_reward(completions, **kwargs):
 
 data_influence_client = DataInfluenceClient()
 
+
+def _extract_completion_after_prefix(
+    completion: list[dict[str, str]],
+    prefix: str,
+) -> str:
+    """Extract generated text after the expected response prefix."""
+    content = completion[0]["content"]
+    match = re.search(re.escape(prefix) + r"(.*)", content, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
+
 def data_influence_reward(
     completions: list[list[dict[str, str]]],
     text: list[str],
@@ -157,9 +169,8 @@ def data_influence_reward(
     """Reward with data influence computed from two checkpoints (loss_before - loss_after)."""
     contents = []
     for completion, t in zip(completions, text):
-        content = completion[0]["content"]
-        match = re.search(r"Here is a paraphrased version:(.*)", content, re.DOTALL)
-        if match and (c := match.group(1).strip()):
+        c = _extract_completion_after_prefix(completion, "Here is a paraphrased version:")
+        if c:
             if len(c) >= 0.7 * len(t):
                 # If the paraphrased version is not too short, use it for scoring.
                 contents.append(c)
@@ -175,6 +186,42 @@ def data_influence_reward(
     return [float(cur) - float(base) for cur, base in zip(cur_values, baseline_values)]
 
 
+def data_influence_pair_reward(
+    completions: list[list[dict[str, str]]],
+    text_a: list[str],
+    text_b: list[str],
+    **kwargs,
+) -> list[float]:
+    """Reward high-influence synthesized generations relative to both inputs."""
+    gen_texts = []
+    zero_reward_flags = []
+    expected_prefix = "Here is a synthesized text capturing their shared essence:"
+    for completion, a, b in zip(completions, text_a, text_b):
+        gen_text = _extract_completion_after_prefix(completion, expected_prefix)
+        wrong_format = not completion[0]["content"].startswith(expected_prefix)
+        if not gen_text:
+            gen_text = completion[0]["content"].strip()
+
+        # Pair analogue of data_influence_reward's short-output guard:
+        # require at least 70% of the mean input length, otherwise fall back.
+        mean_input_len = 0.5 * (len(a) + len(b))
+        too_short = len(gen_text) < 0.7 * mean_input_len
+        if too_short:
+            gen_texts.append(a if len(a) >= len(b) else b)
+        else:
+            gen_texts.append(gen_text)
+        zero_reward_flags.append(wrong_format or too_short)
+
+    gen_values = data_influence_client.score_texts(gen_texts)
+    a_values = data_influence_client.score_texts(text_a)
+    b_values = data_influence_client.score_texts(text_b)
+
+    return [
+        0.0 if zero_flag else 1.0 + float(gen) - 0.5 * (float(a) + float(b))
+        for gen, a, b, zero_flag in zip(gen_values, a_values, b_values, zero_reward_flags)
+    ]
+
+
 def get_reward_funcs(script_args) -> list[Callable]:
     REWARD_FUNCS_REGISTRY = {
         "format": format_reward,
@@ -183,6 +230,7 @@ def get_reward_funcs(script_args) -> list[Callable]:
         "structure": structure_reward,
         "length": length_reward,
         "data_influence": data_influence_reward,
+        "data_influence_pair": data_influence_pair_reward,
     }
     reward_funcs = [REWARD_FUNCS_REGISTRY[func] for func in script_args.reward_funcs]
 
